@@ -1,13 +1,10 @@
-//this code works pretty well. Not awesome, but well enough. 
-//requires the Adafruit libraries to be installed in your /libraries directory
-
-#include <Adafruit_BMP085_U.h>
-#include <Adafruit_GPS.h>
-#include <Adafruit_Sensor.h>
-#include <Adafruit_L3GD20_U.h>
-#include <Adafruit_LSM303_U.h>
-#include <Adafruit_10DOF.h>
-#include <Adafruit_HTU21DF.h>
+#include "Adafruit_BMP085_U.h"
+#include "Adafruit_GPS.h"
+#include "Adafruit_Sensor.h"
+#include "Adafruit_L3GD20_U.h"
+#include "Adafruit_LSM303_U.h"
+#include "Adafruit_10DOF.h"
+#include "Adafruit_HTU21DF.h"
 #include <Wire.h>
 #include <SPI.h>
 
@@ -21,15 +18,6 @@ const int slaveAPin = 52;
 //integer array for data sampling
 unsigned int values[200];
 //byte outputbuffer[1200];
-
-//temperature voltage matrix. index 0, 0xFF is the minimum value - i.e. doesn't work.
-int tempvoltage[50] =
-{0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-0x6D,0x6D,0x6D,0x6D,0x6D,0x6E,0x6F,0x70,0x71,0x72,
-0x73,0x74,0x75,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-
 //define trigger pin
 const int eventtrigger = 49;
 boolean eventhappened = false;
@@ -64,9 +52,8 @@ boolean timereset = false; //has an event been detected?
 String lastgpsread = "";
 //lastgpsread.reserve(100);
 int deviceid = random(1, 10000);
-float temperature = 0;
+float temperature;
 double temperatureh = 0;
-int localtemp = 0;
 double humidity = 0;
 double baroaltitude = 0;
 double accelx = 0;
@@ -75,7 +62,6 @@ double accelz = 0;
 double magx = 0;
 double magy = 0;
 double magz = 0;
-int targethv = 0xFF;
 int currentval = 0xFF;
 long exacttime = 0;
 int uptime = 0;
@@ -101,7 +87,7 @@ void setup()
   pinMode(timeresetpin, INPUT);
   attachInterrupt(timeresetpin, timeset, RISING);
   pinMode(eventtrigger, INPUT);
-  attachInterrupt(eventtrigger, triggermonkey, FALLING);
+  attachInterrupt(eventtrigger, monkey, FALLING);
   Serial.begin(115200);                           // initialize the serial port:
 
   //setup ADC
@@ -111,23 +97,12 @@ void setup()
   adcloopctr = 0;
   Serial.println("ADC Alive");
 
-//check the temperature and set the target voltage
-Serial.println(F("checking temp for target voltage - temp is"));
-      sensorreadout();
-      localtemp = int(temperatureh);
-Serial.println(localtemp);
-      targethv = tempvoltage[localtemp];
-Serial.println(F("Target voltage is"));
-Serial.println(targethv);
-
-//setup SPI interface and start the HV DC ramp
   pinMode (slaveAPin, OUTPUT);
   digitalWrite(slaveAPin, LOW);
   SPI.begin();
   Serial.println(F("ramping start"));
-  ramp(targethv);
+  ramp(0x6D);
 
-  
 }
 
 void loop() {
@@ -170,13 +145,6 @@ if (eventhappened) {
     //Serial.println(F("Event"));
     eventhappened = false;
   }
-
-if (int(temperatureh)!=localtemp)
-{
-  localtemp = int(temperatureh);
-  Serial.println(F("Change in temperature"));
-  stepset(tempvoltage[localtemp]);
-}
 
 if (adcloopctr == sampledepth) {
     adcloopctr = 0;
@@ -242,60 +210,94 @@ void printdatajson()
 {
   //rewritten to use a buffer
   //start the data output on in json format
-  outputbuffer = "{\"gps\":\"";
+  outputbuffer = "{\"gps\": \"";
   outputbuffer = outputbuffer + lastgpsread;
-  outputbuffer = outputbuffer + "\",\"timing\":";
+  outputbuffer = outputbuffer + "\" ,\"timing\":";
   outputbuffer = outputbuffer + exacttime;
-  outputbuffer = outputbuffer +",\"energy\":{\"energy1\":[";
+  outputbuffer = outputbuffer +",\"energy\": { \"energy1\": [";
 
   for (int firsthalf = adcloopctr + 1; firsthalf < sampledepth; firsthalf++)
   {
     outputbuffer = outputbuffer + (values[firsthalf]);
-    if (readoutctr != 1) outputbuffer = outputbuffer + (",");
+    if (readoutctr != 1) outputbuffer = outputbuffer + (", ");
     readoutctr--;
   }
   for (int secondhalf = 0; secondhalf < adcloopctr + 1; secondhalf++)
   {
     outputbuffer = outputbuffer + (values[secondhalf]);
-    if (readoutctr != 1) outputbuffer = outputbuffer + (",");
+    if (readoutctr != 1) outputbuffer = outputbuffer + (", ");
     readoutctr--;
   }
-
-  outputbuffer = outputbuffer + "],";
-   outputbuffer = outputbuffer + "\"energy2\":[";
+  Serial.print((outputbuffer));
+  outputbuffer = "";
+  Serial.print("    ],");
+  Serial.print("    \"energy2\": [");
   readoutctr = 10;
 
   for (int firsthalf = adcloopctr + 1; firsthalf < sampledepth; firsthalf++)
   {
-     outputbuffer = outputbuffer + values[firsthalf + 100];
-    if (readoutctr != 1)  outputbuffer = outputbuffer + ",";
+    Serial.print(values[firsthalf + 100]);
+    if (readoutctr != 1) Serial.print(", ");
     readoutctr--;
   }
   for (int secondhalf = 0; secondhalf < adcloopctr + 1; secondhalf++)
   {
-     outputbuffer = outputbuffer + values[secondhalf + 100];
-    if (readoutctr != 1)  outputbuffer = outputbuffer + ",";
+    Serial.print(values[secondhalf + 100]);
+    if (readoutctr != 1) Serial.print(", ");
     readoutctr--;
   }
-   outputbuffer = outputbuffer + "]},\"altitude\": "+ baroaltitude + ",\"humidity\": " + humidity + ",\"gravitationalOrientation\":{\"x\":" + accelx;
-   outputbuffer = outputbuffer + ",\"y\": "+ accely + ",\"z\":"+ accelz+ "},";
+  Serial.print("    ]");
+  Serial.print("    },");
 
-   outputbuffer = outputbuffer + "\"magneticOrientation\":{\"x\":" + magx + ",\"y\":"+ magy+ ",\"z\":" + magz + "},";
+  Serial.print("    \"altitude\": ");
+  Serial.print(baroaltitude);
+  Serial.print(",");
 
-   outputbuffer = outputbuffer + "\"temperature\":{\"value1\":" + temperatureh; //val1 is from the humidity sensor
-   outputbuffer = outputbuffer + ",\"value2\":";
-   outputbuffer = outputbuffer + temperature;
-   outputbuffer = outputbuffer + "}, \"uptime\":";
-   outputbuffer = outputbuffer + uptime;
-   outputbuffer = outputbuffer + ",\"id\":";
-   outputbuffer = outputbuffer + deviceid;
-   outputbuffer = outputbuffer + "}";
-   Serial.println((outputbuffer));
-   outputbuffer = "";
+  Serial.print("    \"humidity\": ");
+  Serial.print(humidity);
+  Serial.print(",");
+
+  Serial.print("    \"gravitationalOrientation\": {");
+  Serial.print("     \"x\": ");
+  Serial.print(accelx);
+  Serial.print(",");
+  Serial.print("     \"y\": ");
+  Serial.print(accely);
+  Serial.print(",");
+  Serial.print("     \"z\": ");
+  Serial.print(accelz);
+  Serial.print("    },");
+
+  Serial.print("    \"magneticOrientation\": {");
+  Serial.print("     \"x\": ");
+  Serial.print(magx);
+  Serial.print(",");
+  Serial.print("     \"y\": ");
+  Serial.print(magy);
+  Serial.print(",");
+  Serial.print("     \"z\": ");
+  Serial.print(magz);
+  Serial.print("    },");
+
+  Serial.print("    \"temperature\": {");
+  Serial.print("     \"value1\": ");
+  Serial.print(temperatureh); //val1 is from the humidity sensor
+  Serial.print(",");
+  Serial.print("     \"value2\": ");
+  Serial.print(temperature);
+  Serial.print("    },");
+
+  Serial.print("    \"uptime\": ");
+  Serial.print(uptime);
+  Serial.print(",");
+
+  Serial.print("    \"id\": ");
+  Serial.print(deviceid);
+  Serial.println("}");
 }
 
 
-void triggermonkey()
+void monkey()
 {
   //Serial.println("trigger");
   eventhappened = true;
@@ -351,12 +353,12 @@ void timeset()
   timereset = true;
 }
 
-void ramp(int localtarget)
+void ramp(int target)
 {
   //wait 100ms before ramp up
-  int difference = currentval - localtarget;
+  int difference = currentval - target;
 
-  while (currentval > localtarget)
+  while (currentval > target)
   {
     digitalWrite(slaveAPin, LOW);
     SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE0));
@@ -370,18 +372,4 @@ void ramp(int localtarget)
     digitalWrite(slaveAPin, HIGH);
     currentval = currentval - 2;
   }
-}
-
-void stepset(int localtarget)
-{
-    digitalWrite(slaveAPin, LOW);
-    SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE0));
-    delay(180);
-    SPI.transfer(localtarget);
-    Serial.println(F("temperature change, new HV setpoint"));
-    Serial.println(localtarget);
-    delay(180);
-    SPI.endTransaction();
-    digitalWrite(slaveAPin, HIGH);
-  //}
 }
