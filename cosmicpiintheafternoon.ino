@@ -63,6 +63,10 @@ double magx = 0;
 double magy = 0;
 double magz = 0;
 int currentval = 0xFF;
+
+//this is the target voltage for the SIPM supply from the MAX1932
+int stablevoltage = 0x6D;
+
 long exacttime = 0;
 int uptime = 0;
 String outputbuffer = ""; //write all the outputs to a buffer and then fmacro it out
@@ -101,7 +105,7 @@ void setup()
   digitalWrite(slaveAPin, LOW);
   SPI.begin();
   Serial.println(F("ramping start"));
-  ramp(0x6D);
+  ramp(stablevoltage);
 
 }
 
