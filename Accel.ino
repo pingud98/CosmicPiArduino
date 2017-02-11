@@ -1,4 +1,8 @@
-//This file contains subroutines for the Accelerometer and the Pressure sensor.
+//This file contains subroutines for the Accelerometer
+
+#define ACL_ID 0x49    // LMS303D ID register value
+#define ACL_ID_REG 0x0F   // LMS303D ID register address
+
 
 void AccelSetup(){
 

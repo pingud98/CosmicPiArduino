@@ -2,7 +2,7 @@
 
 //Cosmic Pi Firmware - forked version J.Devine 2017
 //Bugs: Internal temperature doesn't work when ADC is in free running mode; configuration needs changing in the temp subroutine.
-
+//This particular build is focused on being a random number generator
 
 float ADCTempValue = 0; //buffer for the internal temperature
 String SerialNumberValue = ""; //Buffer for the serial number
@@ -26,20 +26,29 @@ bool dump = false; //if there's an event, dump the data.
 
 //I2C Bus 0 Addresses
 #define I2CPot 0x28
-#define I2CPot1_PIN 35
-#define I2CPot2_PIN 36
-#define I2CPot3_PIN 37
+#define I2CPot1_PIN 35 //PA0 on the circuit diagram
+#define I2CPot2_PIN 36 //PA1 on the circuit diagram
+#define I2CPot3_PIN 37 //PA2 on the circuit diagram
+
+#define AccelSA0 26
+#define AccelSA1 27 // address pin for the LPS25H
+
 
 //I2C Bus 1 Addresses
 #define HumAddr 0x40
 #define AccelAddr 0x1D  // LMS303D on the main board on i2c bus 1
-#define ACL_ID 0x49    // LMS303D ID register value
-#define ACL_ID_REG 0x0F   // LMS303D ID register address
+#define PressureAddr 0x5C
 
 
 #define AccelFullScale 2.0 // +-2g 16 bit 2's compliment
 #define GravityEarth 9.80665 //The earth's gravity
 
+const int HVSetpoints[50] = {0x8F,0x8F,0x8E,0x8D,0x8D,0x8C,0x8B,0x8B,0x8A,0x89,
+                             0x89,0x88,0x87,0x87,0x86,0x86,0x85,0x84,0x84,0x83,
+                             0x82,0x82,0x81,0x80,0x80,0x7F,0x7E,0x7E,0x7D,0x7D,
+                             0x7C,0x7B,0x7B,0x7A,0x79,0x79,0x78,0x77,0x77,0x76,
+                             0x75,0x75,0x74,0x73,0x73,0x72,0x72,0x71,0x70,0x70};
+//HV setpoints, starting from 0 to 50 degrees (i.e. 0th element is 0 degrees) - add 0.5 and cast as an int for the index.
 
 String StringEventBuf[3] = {"Output String Buffer Event 1", "Output String Buffer Event 2", "Output String Buffer Event 3"};
 long EventTimestamp[3] = {0,0,0};
@@ -53,16 +62,19 @@ void setup() {
   //Start Wire (I2C comms)
     Wire.begin();
     Wire1.begin();
+  
   //LED output pins
     pinMode(Power_LED, OUTPUT); //Power LED
     pinMode(Event_LED, OUTPUT); //Event LED
     pinMode(Event_Input, INPUT); //Event LED
+  
   //SoftSPI output pins
     digitalWrite(SS, HIGH);  // Start with SS high
     pinMode(SS_pin, OUTPUT);
     pinMode(SCK_pin, OUTPUT);
     pinMode(MISO_pin, INPUT); //note this is the avalanche output from the MAX1932, but not yet used
     pinMode(MOSI_pin, OUTPUT);
+  
   //I2CPot output pins
     pinMode(I2CPot1_PIN, OUTPUT);
     pinMode(I2CPot2_PIN, OUTPUT);
@@ -71,18 +83,21 @@ void setup() {
     digitalWrite(I2CPot1_PIN, LOW);
     digitalWrite(I2CPot2_PIN, LOW);
     digitalWrite(I2CPot3_PIN, LOW);
+  
+  // Pressure sensor address setup  
+    pinMode(AccelSA1, OUTPUT); //Pressure Sensor
+    digitalWrite(AccelSA1, LOW);
 
 
     
     Serial.begin(9600);//we run the serial at 9600 for debugging only. 
+  
     //make sure the LED's are off
     digitalWrite(Power_LED, 0);
     digitalWrite(Event_LED, 0);
-    //Temporary positioning; Read the temperature at boot in the Arduino
-    //ADCTempValue = ADCTemp();
-    //Serial.println(ADCTempValue);
-    //Set the Vbias based on the internal temperature at boot
-    VbiasSet(100);
+    PressureSetup();
+    VbiasSet(HVSetpoints[int(PressureTemp()+0.5)]);
+    //VbiasSet(100);
     ThresholdSet(130,130);
     
     //ADCSetup();
@@ -106,7 +121,10 @@ Serial.println(Ch2);
 
 void loop() {
   //Serial.println(String(analogRead(A6))+" "+String(analogRead(A7))+" " +int(digitalRead(Event_Input)));
-
+ Serial.println(PressureTemp());
+ 
+ delay(1000);
+ /*  
 if (digitalRead(Event_Input)) {
 Serial.print("Event ");
 oldtime = timeX;
@@ -128,6 +146,7 @@ EventFlashOff();
 //Serial.println("Accel");
 //AccelRead();
 //    Serial.println(String(Accel[0])+" "+ String(Accel[1])+" "+ String(Accel[2]));
+*/
 }
 
 
