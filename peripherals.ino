@@ -7,7 +7,7 @@ void ThresholdSet(int ThreshA, int ThreshB) {
 //  Serial.println("Test of threshold setting");
 //  Serial.print(ThreshA);
   //Serial.println(analogRead(A1));   //internal readback of the DREF value only, not returned to main code.
-  Wire.beginTransmission(0x28);     // transmit to device #94 (0x5F)
+  Wire.beginTransmission(I2CPot);     // transmit to device #94 (0x5F)
                                     // device address is specified in datasheet
   Wire.write(0x11);                 // sends instruction byte
   Wire.write(ThreshA);              // sends potentiometer value byte
@@ -59,7 +59,7 @@ void VbiasSet(int Vbias) {
   digitalWrite(SS_pin, LOW);                        // SS low
   for (int i = 0; i < 8; i++)                       // There are 8 bits in a byte
   {
-    digitalWrite(MOSI_pin, bitRead(_send, i-7));      // Set MOSI
+    digitalWrite(MOSI_pin, bitRead(_send, 7-i));      // Set MOSI
     digitalWrite(SCK_pin, HIGH);                    // SCK high
     //bitWrite(_receive, i, digitalRead(MISO_pin)); // Capture MISO
     digitalWrite(SCK_pin, LOW);                     // SCK low
