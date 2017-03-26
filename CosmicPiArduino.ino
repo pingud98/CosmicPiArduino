@@ -25,7 +25,7 @@ int calcthreshCh2 = 0;
 int Ch1SetPoint = 0;
 int Ch2SetPoint = 0;
 int VoltageSetPoint = 0;
-int VoltageOffset = 6; //arbitrary correction factor for the voltage, higher numbers = higher voltage
+int VoltageOffset = 9; //arbitrary correction factor for the voltage, higher numbers = higher voltage
 int CMFEvents = 0;
 float EventRate = 0;
 float PressureTempVal = 0;
@@ -168,7 +168,13 @@ void setup() {
   Serial.print(Ch1);
   Serial.print(" ");
   Serial.println(Ch2);
-
+  
+  
+  SerialNumberValue = SerialNumberReadout();
+  Serial.print("Unit Serial Number: ");
+  
+  Serial.println(SerialNumberValue);
+    
   Serial.println("loop starting");
 
 
