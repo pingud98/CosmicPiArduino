@@ -25,10 +25,12 @@ int calcthreshCh2 = 0;
 int Ch1SetPoint = 0;
 int Ch2SetPoint = 0;
 int VoltageSetPoint = 0;
+int VoltageOffset = 6; //arbitrary correction factor for the voltage, higher numbers = higher voltage
 int CMFEvents = 0;
 float EventRate = 0;
 float PressureTempVal = 0;
 float PressureTempValOld = 0;
+bool Checktemp = false;
 
 //SoftSPI pin assignments
 #define SS_pin 42
@@ -72,32 +74,15 @@ const int HVSetpoints[50] = {98, 98, 97, 97, 96, 96, 95, 95, 94, 94,
 //HV setpoints, starting from 0 to 50 degrees (i.e. 0th element is 0 degrees) - add 0.5 and cast as an int for the index.
 
 String StringEventBuf[3] = {"Output String Buffer Event 1", "Output String Buffer Event 2", "Output String Buffer Event 3"};
-long EventTimestamp[3] = {0, 0, 0};
+int EventTimeStamp[3] = {0, 0, 0};
+int EventTimeStampOld[3] = {0, 0, 0};
 float Accel[3]; //Accelerometer array, 0 is X, 1 is Y and 2 is Z.
 unsigned long timeX = 0;
 unsigned long oldtime = 0;
 
 
 void setup() {
-
-
-  // Issue 20 I2C clocks to make sure no slaves are hung in a read
-  pinMode(20, OUTPUT);
-  pinMode(21, OUTPUT);
-  pinMode(70, OUTPUT);
-  pinMode(71, OUTPUT);
-  digitalWrite(20, LOW);
-  digitalWrite(70, LOW);
-  for (int i = 0; i < 20; i++)
-  {
-    digitalWrite(21, LOW);
-    digitalWrite(71, LOW);
-    delayMicroseconds(10);
-    digitalWrite(21, HIGH);
-    digitalWrite(71, HIGH);
-    delayMicroseconds(10);
-  }
-
+  clearI2C();
 
 
   //Start Wire (I2C comms)
@@ -139,7 +124,7 @@ void setup() {
   ThresholdSet(255, 255);
 
   //debug output
-  Serial.begin(9600);//we run the serial at 9600 for debugging only.
+  Serial.begin(9600);//we run the serial at 9600 for debugging only and 115200 when we need to get more data out
 
   PressureSetup();
   Serial.println("Temp:");
@@ -164,10 +149,10 @@ void setup() {
 
 
   //now we set the HV bias
-  VoltageSetPoint = (HVSetpoints[int(PressureTemp() + 0.5)] - 7);
+  VoltageSetPoint = (HVSetpoints[int(PressureTemp() + 0.5)] - VoltageOffset);
   VbiasSet(VoltageSetPoint);//VoltageSetPoint);
   OutputFlag = false;
-  delay(1000); //wait for the GPS to start up
+  delay(10000); //wait for the GPS to start up
   TimerInit();
 
 
@@ -240,54 +225,29 @@ void setup() {
 
   Serial.print("VoltageSetPoint");
   Serial.print("; ");
-  Serial.print("Ch1SetPoint");
+  Serial.print("PressureTempVal");
   Serial.print("; ");
-  Serial.print("Ch2SetPoint");
-  Serial.print("; ");
-
   Serial.print("EventsLastSecond");
-  Serial.print("; ");
-  Serial.print("EventRate");
   Serial.print("; ");
   Serial.print("CMFEvents");
   Serial.print("; ");
   Serial.print("PPSUptime");
+  Serial.print("; ");
+  Serial.print("PPSLength");
+  Serial.print("; ");
+  Serial.print("EventTimeStampOld[0]");
+  Serial.print("; ");
+  Serial.print("EventTimeStampOld[1]");
+  Serial.print("; ");
+  Serial.print("EventTimeStampOld[2]");
   Serial.println("; ");
+ ThresholdSet(Ch1SetPoint, Ch2SetPoint);
+
 }
 
 void loop() {
-  ThresholdSet(Ch1SetPoint, Ch2SetPoint);
-  //Serial.println(Ch1SetPoint);
-  //Serial.println(Ch2SetPoint);
-  //Serial.println(Ch2SetPoint);
-  /*  int Ch1 = analogRead(A1);
-    int Ch2 = analogRead(A2);
-    int ChA = analogRead(A6);
-    int ChB = analogRead(A7);
-    Serial.print(Ch1);
-    Serial.print(" ");
-    Serial.print(Ch2);
-    Serial.print(" ");
-    Serial.print(ChA);
-    Serial.print(" ");
-    Serial.println(ChB);
-  */
-  PressureTempVal = PressureTemp();
-  //Serial.println(PressureTempVal);
-  //Serial.println(PressureTempValOld);
-  if  (int(PressureTempValOld+0.5) != int(PressureTempVal+0.5))
-  {
-    VoltageSetPoint = (HVSetpoints[int(PressureTempVal + 0.5)] - 7);
-    VbiasSet(VoltageSetPoint);//VoltageSetPoint);
-    delay(1000);
-    Serial.println("changed voltage");
-    Serial.println(PressureTempVal);
-    Serial.println(PressureTempValOld);
-    PressureTempValOld = PressureTempVal;
-  }
-
-
-
+  
+  
 
   if (OutputFlag)
   {
@@ -312,25 +272,66 @@ void loop() {
     */
     Serial.print(VoltageSetPoint);
     Serial.print("; ");
-    Serial.print(Ch1SetPoint);
+    Serial.print(PressureTempVal);
     Serial.print("; ");
-    Serial.print(Ch2SetPoint);
-    Serial.print("; ");
-
     Serial.print(EventsLastSecond);
     Serial.print("; ");
-    Serial.print(EventRate);
-    Serial.print("; ");
+    //Serial.print(EventRate);
+    //Serial.print("; ");
     Serial.print(CMFEvents);
     Serial.print("; ");
     Serial.print(PPSUptime);
     Serial.print("; ");
+    Serial.print(PPSLength);
+    Serial.print("; ");
     Serial.print(float(CMFEvents)/float(PPSUptime));
+    Serial.print("; ");
+    Serial.print(EventTimeStampOld[0]);
+    Serial.print("; ");
+    
+    Serial.print(EventTimeStampOld[1]);
+    Serial.print("; ");
+    
+    Serial.print(EventTimeStampOld[2]);
     Serial.println("; ");
 
-
+    Checktemp = true;
     OutputFlag = false;
   }
+
+  //Serial.println(Ch1SetPoint);
+  //Serial.println(Ch2SetPoint);
+  //Serial.println(Ch2SetPoint);
+  /*  int Ch1 = analogRead(A1);
+    int Ch2 = analogRead(A2);
+    int ChA = analogRead(A6);
+    int ChB = analogRead(A7);
+    Serial.print(Ch1);
+    Serial.print(" ");
+    Serial.print(Ch2);
+    Serial.print(" ");
+    Serial.print(ChA);
+    Serial.print(" ");
+    Serial.println(ChB);
+  */
+  if ((PPSUptime % 60 == 0) & Checktemp) {
+  PressureTempVal = PressureTemp();
+  //Serial.println(PressureTempVal);
+  //Serial.println(PressureTempValOld);
+  if  (int(PressureTempValOld+0.5) != int(PressureTempVal+0.5))
+  {
+    VoltageSetPoint = (HVSetpoints[int(PressureTempVal + 0.5)] - VoltageOffset);
+    VbiasSet(VoltageSetPoint);//VoltageSetPoint);
+    //delay(1000);
+    //Serial.println("changed voltage");
+    //Serial.println(PressureTempVal);
+    //Serial.println(PressureTempValOld);
+    PressureTempValOld = PressureTempVal;
+  }
+  Checktemp = false;
+  }
+
+
   //else
   //{
   //  Serial.println("Nothing");
@@ -415,16 +416,20 @@ void TimerInit() {
 void TC0_Handler() {
   //This is called the one second event interrupt in documentation
   //when the PPS event occurs
+  TC2->TC_CHANNEL[0].TC_CCR = TC_CCR_SWTRG; //forward the reset to TC2 event counter
   PPSLength = TC0->TC_CHANNEL[0].TC_RA; // Read the RA reg (PPS period)
   //Ch2SetPoint--;
-  if (EventsThisSecond > 2)
+  if (EventsThisSecond > 3)
   {
     EventsThisSecond = 1; //we consider that >1 events is bounce, not events, this is <3% probable
   }
   EventsLastSecond = EventsThisSecond;
   CMFEvents = CMFEvents + EventsLastSecond;
   EventRate = (EventRate + EventsLastSecond) / 2;
-  OutputFlag = true;
+EventTimeStampOld[0]= EventTimeStamp[0];
+EventTimeStampOld[1]= EventTimeStamp[1];
+EventTimeStampOld[2]= EventTimeStamp[2];
+OutputFlag = true;
   //}
   //else
   //{
@@ -432,9 +437,15 @@ void TC0_Handler() {
   //}
 
   EventsThisSecond = 0;
+  EventTimeStamp[0] = 0;
+  EventTimeStamp[1] = 0;
+  EventTimeStamp[2] = 0;
+  
   digitalWrite(Event_LED, 0);
 
   TC_GetStatus(TC0, 0);     // Read status and clear load bits
+  TC_GetStatus(TC2, 0);     // Reset TC2 at the same time
+
 
   tempflipvar = !tempflipvar;
   digitalWrite(Power_LED, tempflipvar);
@@ -446,12 +457,17 @@ void TC0_Handler() {
 
 void TC6_Handler() {
   //This is called when the trigger is activated
-  //EventTimestamp[EventsThisSecond] =  TC0->TC_CHANNEL[0].TC_RA; //read the main clock and copy it to the event register
+  int EventTimeBuffer = TC2->TC_CHANNEL[0].TC_RA;
+  
+  //exlcude events if they happen within the dead time of 600 cycles (approx 18uS)
+  if (EventTimeBuffer > 800)
+  {
+  EventTimeStamp[EventsThisSecond] = EventTimeBuffer;  //read the main clock and copy it to the event register
   EventsThisSecond++; //increment the event counter for this second
   digitalWrite(Event_LED, 1);
 
   TC_GetStatus(TC2, 0);     // Read status clear load bits, unlocking this interrupt.
-
+  }
 }
 
 

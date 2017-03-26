@@ -79,6 +79,8 @@ void PressureSetup(){
 }
 
 float PressureTemp(){
+  //clearI2C();
+
 //Read the Temperature using the pressure sensor, borrowed from the LPS Library by ryantm
 // go find the full thing at https://github.com/pololu/lps-arduino  
   Wire1.beginTransmission(PressureAddr);
@@ -95,6 +97,7 @@ float PressureTemp(){
   // combine bytes
   int16_t PresTempRaw = (th << 8 | tl);
   return 42.5 + (float)PresTempRaw / 480;
+//clearI2C();
 
 }
 
