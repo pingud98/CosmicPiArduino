@@ -10,15 +10,25 @@ long PPSLength = 0; //The number of internal clock cycles in a GPS PPS
 long PPSUptime = 0; //The number of PPS pulses counted since the last reboot.
 long PreviousPPS = 0; //The value of the previous PPS (to define which second we're in)
 int EventsThisSecond = 0; //The number of events since the last PPS
-bool dump = false; //if there's an event, dump the data.
+int EventsLastSecond = 0; //events in the last second
+bool dump = false; //if there's an event, dump the data
+bool OutputFlag = false;
 int Ch1Offset = 240; //Channel 1 trigger offset
 int Ch2Offset = 240; //Channel 2 trigger offset
 bool tempflipvar = true; //flash the light when GPS is locked
 bool tempevtvar = false; //temp event value
+bool changingvoltage = false; //when changing the voltage ignore inputs for a few seconds
 int readthresholdCh1 = 0; //read in values for the thresholds; for software triggering
 int readthresholdCh2 = 0;
 int calcthreshCh1 = 0; //calcualte the thresholds
 int calcthreshCh2 = 0;
+int Ch1SetPoint = 0;
+int Ch2SetPoint = 0;
+int VoltageSetPoint = 0;
+int CMFEvents = 0;
+float EventRate = 0;
+float PressureTempVal = 0;
+float PressureTempValOld = 0;
 
 //SoftSPI pin assignments
 #define SS_pin 42
@@ -53,11 +63,11 @@ int calcthreshCh2 = 0;
 
 
 //this table is WAY OFF
-const int HVSetpoints[50] = {98,98,97,97,96, 96,95,95,94,94,
-                             93,93,92,92,91, 91,90,90,89,88,
-                             88,87,87,86,86, 85,85,84,84,83,
-                             83,82,82,81,81, 80,80,79,79,78,
-                             78,77,77,76,76, 75,75,74,74,73
+const int HVSetpoints[50] = {98, 98, 97, 97, 96, 96, 95, 95, 94, 94,
+                             93, 93, 92, 92, 91, 91, 90, 90, 89, 88,
+                             88, 87, 87, 86, 86, 85, 85, 84, 84, 83,
+                             83, 82, 82, 81, 81, 80, 80, 79, 79, 78,
+                             78, 77, 77, 76, 76, 75, 75, 74, 74, 73
                             };
 //HV setpoints, starting from 0 to 50 degrees (i.e. 0th element is 0 degrees) - add 0.5 and cast as an int for the index.
 
@@ -69,6 +79,26 @@ unsigned long oldtime = 0;
 
 
 void setup() {
+
+
+  // Issue 20 I2C clocks to make sure no slaves are hung in a read
+  pinMode(20, OUTPUT);
+  pinMode(21, OUTPUT);
+  pinMode(70, OUTPUT);
+  pinMode(71, OUTPUT);
+  digitalWrite(20, LOW);
+  digitalWrite(70, LOW);
+  for (int i = 0; i < 20; i++)
+  {
+    digitalWrite(21, LOW);
+    digitalWrite(71, LOW);
+    delayMicroseconds(10);
+    digitalWrite(21, HIGH);
+    digitalWrite(71, HIGH);
+    delayMicroseconds(10);
+  }
+
+
 
   //Start Wire (I2C comms)
   Wire.begin();
@@ -113,78 +143,220 @@ void setup() {
 
   PressureSetup();
   Serial.println("Temp:");
-  Serial.println(PressureTemp());
-  VbiasSet(HVSetpoints[int(PressureTemp() + 0.5)]+5);
-  delay(1000);
-  //set the thresholds; rewrite this to not echo in future
-  //read the threshold setpoints
-  Serial.println("Initial Threshold values");
+  PressureTempVal = PressureTemp();
+  Serial.println(PressureTempVal);
+  PressureTempValOld = PressureTempVal;
+
+  //We're going to do the single chan. calibration now
+  //stage 1 - set the channels; Ch A is being calibrated. Set this value to 255
+  //Channel B isn't, so set it to 0 (i.e. always triggering).
+  /*
+    //These are the values to scan Ch1
+    Ch1SetPoint = 0;
+    Ch2SetPoint = 134; //note this doesn't seem to work under 30..
+    ThresholdSet(Ch1SetPoint,Ch2SetPoint);
+  */
+  //These are the values to scan Ch1
+  Ch1SetPoint = 255;
+  Ch2SetPoint = 255; //note this doesn't seem to work under 30..
+  ThresholdSet(Ch1SetPoint, Ch2SetPoint);
+
+
+
+  //now we set the HV bias
+  VoltageSetPoint = (HVSetpoints[int(PressureTemp() + 0.5)] - 7);
+  VbiasSet(VoltageSetPoint);//VoltageSetPoint);
+  OutputFlag = false;
+  delay(1000); //wait for the GPS to start up
+  TimerInit();
+
+
+  Serial.println("Threshold start values");
   int Ch1 = analogRead(A1);
   int Ch2 = analogRead(A2);
   Serial.print(Ch1);
   Serial.print(" ");
   Serial.println(Ch2);
-  Serial.println("Backed-off Analogue values");
+  Serial.println("Analogue Values");
   Ch1 = analogRead(A6);
   Ch2 = analogRead(A7);
   Serial.print(Ch1);
   Serial.print(" ");
   Serial.println(Ch2);
 
-  calcthreshCh1 =(Ch1+Ch1Offset) >> 2;
-  calcthreshCh2 =(Ch2+Ch2Offset) >> 2;
-  ThresholdSet(calcthreshCh1,calcthreshCh2);
+  Serial.println("loop starting");
 
-  Serial.println("Calculated threshold values");
-  
-  Serial.print(calcthreshCh1);
-  Serial.print(" ");
-  Serial.println(calcthreshCh2);
-  
-  Serial.println("New Threshold values");
-  readthresholdCh1 = analogRead(A1);
-  readthresholdCh2 = analogRead(A2);
-  Serial.print(readthresholdCh1);
-  Serial.print(" ");
-  Serial.println(readthresholdCh2);
-  
-  VbiasSet(HVSetpoints[int(PressureTemp() + 0.5)]);
-  delay(1000);
-  
+
   /*
-  //ADCSetup();
-  //AccelSetup();
-  SerialNumberValue = SerialNumberReadout();
-  Serial.println(SerialNumberValue);
-  Serial.println("finished init");
-  //timeX = millis();
-  Serial.println("analogue values ");
+    VbiasSet(HVSetpoints[int(PressureTemp() + 0.5)]+5);
+    delay(1000);
+    //set the thresholds; rewrite this to not echo in future
+    //read the threshold setpoints
+    Serial.println("Initial Threshold values");
+    int Ch1 = analogRead(A1);
+    int Ch2 = analogRead(A2);
+    Serial.print(Ch1);
+    Serial.print(" ");
+    Serial.println(Ch2);
+    Serial.println("Backed-off Analogue values");
+    Ch1 = analogRead(A6);
+    Ch2 = analogRead(A7);
+    Serial.print(Ch1);
+    Serial.print(" ");
+    Serial.println(Ch2);
 
-  //TimerInit();
-*/
+    calcthreshCh1 =(Ch1+Ch1Offset) >> 2;
+    calcthreshCh2 =(Ch2+Ch2Offset) >> 2;
+    ThresholdSet(calcthreshCh1,calcthreshCh2);
 
+    Serial.println("Calculated threshold values");
+
+    Serial.print(calcthreshCh1);
+    Serial.print(" ");
+    Serial.println(calcthreshCh2);
+
+    Serial.println("New Threshold values");
+    readthresholdCh1 = analogRead(A1);
+    readthresholdCh2 = analogRead(A2);
+    Serial.print(readthresholdCh1);
+    Serial.print(" ");
+    Serial.println(readthresholdCh2);
+
+    VbiasSet(HVSetpoints[int(PressureTemp() + 0.5)]);
+    delay(1000);
+  */
+
+  /*
+    //ADCSetup();
+    //AccelSetup();
+    SerialNumberValue = SerialNumberReadout();
+    Serial.println(SerialNumberValue);
+    Serial.println("finished init");
+    //timeX = millis();
+    Serial.println("analogue values ");
+
+    //TimerInit();
+  */
+
+  Serial.print("VoltageSetPoint");
+  Serial.print("; ");
+  Serial.print("Ch1SetPoint");
+  Serial.print("; ");
+  Serial.print("Ch2SetPoint");
+  Serial.print("; ");
+
+  Serial.print("EventsLastSecond");
+  Serial.print("; ");
+  Serial.print("EventRate");
+  Serial.print("; ");
+  Serial.print("CMFEvents");
+  Serial.print("; ");
+  Serial.print("PPSUptime");
+  Serial.println("; ");
 }
 
 void loop() {
-// for (int i = 0; i < 220; i++)                
-// {
-//  VbiasSet(i);
-//  delay(100);
-//  for (int i = 0; i < 5; i++)                
-// {
-  int Ch1 = analogRead(A6);
-  int Ch2 = analogRead(A7);
-  if (Ch1 > readthresholdCh1) {
+  ThresholdSet(Ch1SetPoint, Ch2SetPoint);
+  //Serial.println(Ch1SetPoint);
+  //Serial.println(Ch2SetPoint);
+  //Serial.println(Ch2SetPoint);
+  /*  int Ch1 = analogRead(A1);
+    int Ch2 = analogRead(A2);
+    int ChA = analogRead(A6);
+    int ChB = analogRead(A7);
+    Serial.print(Ch1);
+    Serial.print(" ");
+    Serial.print(Ch2);
+    Serial.print(" ");
+    Serial.print(ChA);
+    Serial.print(" ");
+    Serial.println(ChB);
+  */
+  PressureTempVal = PressureTemp();
+  //Serial.println(PressureTempVal);
+  //Serial.println(PressureTempValOld);
+  if  (int(PressureTempValOld+0.5) != int(PressureTempVal+0.5))
+  {
+    VoltageSetPoint = (HVSetpoints[int(PressureTempVal + 0.5)] - 7);
+    VbiasSet(VoltageSetPoint);//VoltageSetPoint);
+    delay(1000);
+    Serial.println("changed voltage");
+    Serial.println(PressureTempVal);
+    Serial.println(PressureTempValOld);
+    PressureTempValOld = PressureTempVal;
+  }
+
+
+
+
+  if (OutputFlag)
+  {
+    /*
+
+      Serial.println("Got some events");
+      Serial.println(Ch1SetPoint);
+      Serial.println(EventsLastSecond);
+      Serial.println("End of Readout");
+      Serial.println("Threshold values");
+      int Ch1 = analogRead(A1);
+      int Ch2 = analogRead(A2);
+      Serial.print(Ch1);
+      Serial.print(" ");
+      Serial.println(Ch2);
+      Serial.println("Analogue Values");
+      Ch1 = analogRead(A6);
+      Ch2 = analogRead(A7);
+      Serial.print(Ch1);
+      Serial.print(" ");
+      Serial.println(Ch2);
+    */
+    Serial.print(VoltageSetPoint);
+    Serial.print("; ");
+    Serial.print(Ch1SetPoint);
+    Serial.print("; ");
+    Serial.print(Ch2SetPoint);
+    Serial.print("; ");
+
+    Serial.print(EventsLastSecond);
+    Serial.print("; ");
+    Serial.print(EventRate);
+    Serial.print("; ");
+    Serial.print(CMFEvents);
+    Serial.print("; ");
+    Serial.print(PPSUptime);
+    Serial.print("; ");
+    Serial.print(float(CMFEvents)/float(PPSUptime));
+    Serial.println("; ");
+
+
+    OutputFlag = false;
+  }
+  //else
+  //{
+  //  Serial.println("Nothing");
+  //  }
+
+  /*
+    // for (int i = 0; i < 220; i++)
+    // {
+    //  VbiasSet(i);
+    //  delay(100);
+    //  for (int i = 0; i < 5; i++)
+    // {
+    int Ch1 = analogRead(A6);
+    int Ch2 = analogRead(A7);
+    if (Ch1 > readthresholdCh1) {
     if (Ch2 > readthresholdCh2) {
       Serial.print(Ch1);
       Serial.print(" ");
       Serial.println(Ch2);
-  }
-  
- }
- 
+    }
+
+    }
+
     //}
-  //}
+    //}
+  */
 }
 
 
@@ -244,25 +416,40 @@ void TC0_Handler() {
   //This is called the one second event interrupt in documentation
   //when the PPS event occurs
   PPSLength = TC0->TC_CHANNEL[0].TC_RA; // Read the RA reg (PPS period)
-  TC_GetStatus(TC0, 0);     // Read status and clear load bits
-  tempflipvar = !tempflipvar;
-  digitalWrite(Power_LED, tempflipvar);
+  //Ch2SetPoint--;
+  if (EventsThisSecond > 2)
+  {
+    EventsThisSecond = 1; //we consider that >1 events is bounce, not events, this is <3% probable
+  }
+  EventsLastSecond = EventsThisSecond;
+  CMFEvents = CMFEvents + EventsLastSecond;
+  EventRate = (EventRate + EventsLastSecond) / 2;
+  OutputFlag = true;
+  //}
+  //else
+  //{
+  //  OutputFlag= false;
+  //}
+
+  EventsThisSecond = 0;
   digitalWrite(Event_LED, 0);
 
+  TC_GetStatus(TC0, 0);     // Read status and clear load bits
+
+  tempflipvar = !tempflipvar;
+  digitalWrite(Power_LED, tempflipvar);
+  //digitalWrite(Event_LED, 0);
+
   PPSUptime++;        // PPS count
-  EventsThisSecond = 0; //reset the event counter for this second
+  //EventsThisSecond = 0; //reset the event counter for this second
 }
 
 void TC6_Handler() {
-  Serial.println("Cosmic");
-  //rega1 = TC2->TC_CHANNEL[0].TC_RA; // Read the RA on channel 1 (PPS period)
-  //stsr1 =
-  //  tempevtvar=!tempevtvar;
-  digitalWrite(Event_LED, 1);
-  
-
-  EventTimestamp[EventsThisSecond] =  TC0->TC_CHANNEL[0].TC_RA; //read the main clock and copy it to the event register
+  //This is called when the trigger is activated
+  //EventTimestamp[EventsThisSecond] =  TC0->TC_CHANNEL[0].TC_RA; //read the main clock and copy it to the event register
   EventsThisSecond++; //increment the event counter for this second
+  digitalWrite(Event_LED, 1);
+
   TC_GetStatus(TC2, 0);     // Read status clear load bits, unlocking this interrupt.
 
 }
